@@ -40,6 +40,26 @@ class SummaryKind(str, Enum):
     CONDENSED = "condensed"
 
 
+class MemoryCategory(str, Enum):
+    """Memory category classification (from memory-lancedb-pro)."""
+    PROFILE = "profile"      # User profiles, identity
+    PREFERENCES = "preferences"  # User preferences, settings
+    ENTITIES = "entities"    # Named entities, objects
+    EVENTS = "events"       # Event occurrences
+    CASES = "cases"         # Case studies, examples
+    PATTERNS = "patterns"   # Behavioral patterns, rules
+    FACT = "fact"           # Factual knowledge
+    DECISION = "decision"   # Decisions made
+    OTHER = "other"         # Unclassified
+
+
+class MemoryTier(str, Enum):
+    """Memory tier based on importance/recency (from memory-lancedb-pro)."""
+    PERIPHERAL = "peripheral"  # Low importance, can be forgotten
+    WORKING = "working"        # Medium importance, active use
+    CORE = "core"              # High importance, persistent
+
+
 class ContextItemType(str, Enum):
     """Type of context item."""
     MESSAGE = "message"
@@ -148,6 +168,15 @@ class SummaryRecord:
     source_message_token_count: int = 0
     model: str = "unknown"
     created_at: Optional[datetime] = None
+    # Memory lifecycle fields (from memory-lancedb-pro)
+    category: Optional[MemoryCategory] = None
+    tier: MemoryTier = MemoryTier.PERIPHERAL
+    access_count: int = 0
+    last_accessed_at: Optional[datetime] = None
+    decay_score: float = 1.0  # Weibull decay score
+    importance: float = 0.5   # 0.0 to 1.0
+    # Scope isolation field (global/agent:/project:/user:)
+    scope: str = "global"
 
 
 @dataclass

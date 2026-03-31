@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Awaitable, Union
 
 from estimate_tokens import estimate_tokens
+from lcm_types import MemoryCategory, MemoryTier
 from transcript_repair import sanitize_tool_use_result_pairing
 
 
@@ -142,6 +143,120 @@ def _sanitize_line(line: str) -> str:
     result = re.sub(r'\s*[,;:]\s*$', '', result)
     
     return result.strip()
+
+
+def classify_memory_content(content: str, role: str = "user") -> MemoryCategory:
+    """Classify memory content into one of 6 categories.
+    
+    Categories: profile, preferences, entities, events, cases, patterns, fact, decision, other
+    
+    Args:
+        content: Text content to classify
+        role: Message role (user/assistant)
+        
+    Returns:
+        MemoryCategory enum value
+        
+    Examples:
+        >>> classify_memory_content("I prefer dark mode theme")
+        <MemoryCategory.PREFERENCES>
+        >>> classify_memory_content("We decided to use Python")
+        <MemoryCategory.DECISION>
+    """
+    content_lower = content.lower()
+    
+    # Decision patterns
+    if any(kw in content_lower for kw in ["decide", "decision", "choose", "pick", "selected", "went with", "option"]):
+        return MemoryCategory.DECISION
+    
+    # Preference patterns
+    if any(kw in content_lower for kw in ["prefer", "like", "always", "never", "use", "don't use", "avoid", "favorite"]):
+        return MemoryCategory.PREFERENCES
+    
+    # Pattern/rules patterns  
+    if any(kw in content_lower for kw in ["pattern", "always do", "never do", "rule", "follow", "standard"]):
+        return MemoryCategory.PATTERNS
+    
+    # Event patterns
+    if any(kw in content_lower for kw in ["happened", "event", "occurred", "when", "date", "yesterday", "last week", "month"]):
+        return MemoryCategory.EVENTS
+    
+    # Entity patterns (names, specific items)
+    if any(kw in content_lower for kw in ["@", "named", "called", "specific", "particular"]):
+        return MemoryCategory.ENTITIES
+    
+    # Case/study patterns
+    if any(kw in content_lower for kw in ["case", "example", "instance", "situation", "scenario"]):
+        return MemoryCategory.CASES
+    
+    # Fact patterns
+    if any(kw in content_lower for kw in ["fact", "actually", "in fact", "truth", "true"]):
+        return MemoryCategory.FACT
+    
+    # Profile patterns
+    if any(kw in content_lower for kw in ["i am", "i'm", "my name", "person", "developer", "engineer"]):
+        return MemoryCategory.PROFILE
+    
+    return MemoryCategory.OTHER
+
+
+def estimate_memory_importance(content: str, category: MemoryCategory) -> float:
+    """Estimate memory importance based on content and category.
+    
+    Args:
+        content: Text content
+        category: Memory category
+        
+    Returns:
+        Importance score 0.0 to 1.0
+        
+    Examples:
+        >>> estimate_memory_importance("Short text", MemoryCategory.DECISION)
+        0.8
+        >>> estimate_memory_importance("A" * 600, MemoryCategory.PREFERENCES)
+        0.8
+    """
+    base_scores = {
+        MemoryCategory.DECISION: 0.8,
+        MemoryCategory.PREFERENCES: 0.7,
+        MemoryCategory.PATTERNS: 0.75,
+        MemoryCategory.FACT: 0.5,
+        MemoryCategory.PROFILE: 0.6,
+        MemoryCategory.EVENTS: 0.5,
+        MemoryCategory.ENTITIES: 0.6,
+        MemoryCategory.CASES: 0.55,
+        MemoryCategory.OTHER: 0.4,
+    }
+    
+    base = base_scores.get(category, 0.5)
+    
+    # Increase for longer content (more detailed)
+    content_len = len(content)
+    if content_len > 500:
+        base += 0.1
+    elif content_len > 1000:
+        base += 0.15
+    
+    # Cap at 1.0
+    return min(1.0, base)
+
+
+def create_memory_summary(content: str, category: MemoryCategory, importance: float) -> str:
+    """Create structured memory summary with metadata.
+    
+    Args:
+        content: Original content
+        category: Memory category
+        importance: Importance score
+        
+    Returns:
+        Formatted memory summary string
+        
+    Examples:
+        >>> create_memory_summary("I prefer tea", MemoryCategory.PREFERENCES, 0.7)
+        '[preferences] importance=0.70\\nI prefer tea'
+    """
+    return f"[{category.value}] importance={importance:.2f}\n{content}"
 
 
 @dataclass

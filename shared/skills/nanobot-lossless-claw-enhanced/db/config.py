@@ -153,8 +153,8 @@ def resolve_lcm_config(
         result = _to_str_array(pc.get(key.lower().replace("_", "")))
         return result if result is not None else []
     
-    # Default database path
-    default_db_path = str(Path.home() / ".openclaw" / "lcm.db")
+    # Default database path - nanobot workspace
+    default_db_path = str(Path.home() / ".nanobot" / "workspace" / "lcm.db")
     
     return LcmConfig(
         enabled=get_bool("LCM_ENABLED", True),

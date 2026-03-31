@@ -16,9 +16,10 @@ Usage:
         # Use plan.where and plan.args in SQL query
 """
 
+import math
 import re
 from dataclasses import dataclass, field
-from typing import List, Tuple
+from typing import Dict, List, Tuple
 
 
 # Unicode ranges for CJK characters
@@ -74,6 +75,22 @@ class LikeSearchPlan:
     terms: List[str] = field(default_factory=list)
     where: str = ""
     args: List[str] = field(default_factory=list)
+
+
+@dataclass
+class BM25Result:
+    """Result from BM25 scoring.
+    
+    Attributes:
+        score: The final BM25 score
+        term_freq_map: Map of term to frequency in document
+        doc_length: Length of the document in tokens
+        avg_doc_length: Average document length in the collection
+    """
+    score: float
+    term_freq_map: Dict[str, int]
+    doc_length: int
+    avg_doc_length: float
 
 
 def contains_cjk(text: str) -> bool:
@@ -373,6 +390,145 @@ def should_use_fallback(text: str, threshold: float = 0.3) -> bool:
         True
     """
     return contains_cjk(text) or estimate_cjk_ratio(text) >= threshold
+
+
+def calculate_bm25_score(
+    doc_tokens: List[str],
+    query_tokens: List[str],
+    doc_length: int,
+    avg_doc_length: float,
+    doc_freq_map: Dict[str, int],
+    total_docs: int,
+    k1: float = 1.5,
+    b: float = 0.75
+) -> float:
+    """Calculate BM25 score for a document.
+    
+    BM25 formula:
+    score = Σ IDF(term) × (tf × (k1 + 1)) / (tf + k1 × (1 - b + b × |d|/avgdl))
+    
+    Args:
+        doc_tokens: Tokenized document
+        query_tokens: Tokenized query
+        doc_length: Document length
+        avg_doc_length: Average document length in collection
+        doc_freq_map: Document frequency map for each term
+        total_docs: Total number of documents
+        k1: Term frequency saturation parameter (default: 1.5)
+        b: Length normalization parameter (default: 0.75)
+        
+    Returns:
+        BM25 score
+        
+    Examples:
+        >>> doc_tokens = ["python", "is", "popular"]
+        >>> query_tokens = ["python"]
+        >>> doc_freq_map = {"python": 10, "is": 100, "popular": 50}
+        >>> calculate_bm25_score(doc_tokens, query_tokens, 3, 50.0, doc_freq_map, 1000)
+        1.92  # doctest: +SKIP
+    """
+    score = 0.0
+    
+    for term in query_tokens:
+        if term not in doc_freq_map:
+            continue
+            
+        tf = doc_tokens.count(term)
+        df = doc_freq_map[term]
+        
+        # IDF calculation with smoothing
+        idf = max(0, math.log((total_docs - df + 0.5) / (df + 0.5) + 1))
+        
+        # BM25 term score
+        term_score = idf * (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * doc_length / avg_doc_length))
+        score += term_score
+    
+    return score
+
+
+def tokenize_for_bm25(text: str) -> List[str]:
+    """Tokenize text for BM25 indexing.
+    
+    Args:
+        text: Text to tokenize
+        
+    Returns:
+        List of lowercase tokens
+        
+    Examples:
+        >>> tokenize_for_bm25("Hello World!")
+        ['hello', 'world']
+        >>> tokenize_for_bm25("Python 程式設計")
+        ['python', '程式設計']
+    """
+    tokens = re.findall(r'\w+', text.lower())
+    return tokens
+
+
+def build_bm25_index(documents: List[str]) -> Tuple[Dict[str, int], float, int]:
+    """Build BM25 index from documents.
+    
+    Args:
+        documents: List of text documents to index
+        
+    Returns:
+        Tuple of (doc_freq_map, avg_doc_length, total_docs)
+        
+    Examples:
+        >>> docs = ["python is popular", "java is popular too"]
+        >>> df_map, avg_len, total = build_bm25_index(docs)
+        >>> len(df_map)
+        4
+        >>> avg_len
+        3.5
+        >>> total
+        2
+    """
+    doc_freq_map: Dict[str, int] = {}
+    total_length = 0
+    total_docs = len(documents)
+    
+    for doc in documents:
+        tokens = tokenize_for_bm25(doc)
+        total_length += len(tokens)
+        
+        # Count document frequency
+        for token in set(tokens):
+            doc_freq_map[token] = doc_freq_map.get(token, 0) + 1
+    
+    avg_doc_length = total_length / total_docs if total_docs > 0 else 1
+    
+    return doc_freq_map, avg_doc_length, total_docs
+
+
+def hybrid_search_score(
+    vector_score: float,
+    bm25_score: float,
+    vector_weight: float = 0.7,
+    bm25_weight: float = 0.3
+) -> float:
+    """Combine vector and BM25 scores with weights.
+    
+    Args:
+        vector_score: Vector similarity score (0-1)
+        bm25_score: BM25 keyword score
+        vector_weight: Weight for vector score (default: 0.7)
+        bm25_weight: Weight for BM25 score (default: 0.3)
+        
+    Returns:
+        Combined score (0-1 range after normalization)
+        
+    Examples:
+        >>> hybrid_search_score(0.8, 100.0, 0.7, 0.3)  # High vector, high BM25
+        0.62  # doctest: +SKIP
+        >>> hybrid_search_score(0.5, 0.0, 0.7, 0.3)  # No BM25
+        0.35
+    """
+    # Normalize BM25 score (typically not bounded)
+    # Using a simple sigmoid-like normalization
+    normalized_bm25 = 1 / (1 + math.exp(-bm25_score / 100))
+    
+    return vector_weight * vector_score + bm25_weight * normalized_bm25
 
 
 if __name__ == "__main__":

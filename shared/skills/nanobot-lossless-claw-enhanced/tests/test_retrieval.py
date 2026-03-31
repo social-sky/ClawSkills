@@ -35,9 +35,7 @@ from db.config import resolve_lcm_config
 from retrieval import (
     RetrievalEngine,
     RetrievalConfig,
-    describe,
-    grep,
-    expand,
+    # describe, grep, expand are methods of RetrievalEngine, not top-level functions
 )
 
 

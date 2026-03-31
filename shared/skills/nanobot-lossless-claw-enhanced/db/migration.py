@@ -81,6 +81,34 @@ def _ensure_summary_model_column(db: sqlite3.Connection) -> None:
         db.execute("ALTER TABLE summaries ADD COLUMN model TEXT NOT NULL DEFAULT 'unknown'")
 
 
+def _ensure_memory_lifecycle_columns(db: sqlite3.Connection) -> None:
+    """Add memory lifecycle columns to summaries table.
+    
+    Columns added:
+    - category: Memory category (profile, preferences, entities, events, cases, patterns, fact, decision, other)
+    - tier: Memory tier (peripheral, working, core)
+    - access_count: Number of times this memory was accessed
+    - last_accessed_at: Last access timestamp
+    - decay_score: Computed decay score (0.0 to 1.0)
+    - importance: Intrinsic importance (0.0 to 1.0)
+    """
+    columns = db.execute("PRAGMA table_info(summaries)").fetchall()
+    column_names = [col[0] for col in columns]
+    
+    column_defs = [
+        ("category", "TEXT"),  # MemoryCategory enum value
+        ("tier", "TEXT NOT NULL DEFAULT 'peripheral'"),  # MemoryTier enum value
+        ("access_count", "INTEGER NOT NULL DEFAULT 0"),
+        ("last_accessed_at", "TEXT"),  # ISO timestamp
+        ("decay_score", "REAL NOT NULL DEFAULT 1.0"),  # 0.0 to 1.0
+        ("importance", "REAL NOT NULL DEFAULT 0.5"),  # 0.0 to 1.0
+    ]
+    
+    for col_name, col_type in column_defs:
+        if col_name not in column_names:
+            db.execute(f"ALTER TABLE summaries ADD COLUMN {col_name} {col_type}")
+
+
 def _parse_timestamp(value: Optional[str]) -> Optional[datetime]:
     """Parse timestamp string to datetime object."""
     if not value or not return None
@@ -673,6 +701,7 @@ def run_lcm_migrations(
     _ensure_summary_depth_column(db)
     _ensure_summary_metadata_columns(db)
     _ensure_summary_model_column(db)
+    _ensure_memory_lifecycle_columns(db)
     
     # CJK recount MUST run before backfill_summary_metadata
     _recalculate_cjk_token_counts(db)
